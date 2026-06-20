@@ -1,284 +1,171 @@
 "use client"
+
 import { useRouter } from "next/navigation"
-import { SetStateAction, useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import {
-  ArrowRight,
-  Check,
-  Clock,
-  Filter,
-  BarChart3,
-  Home,
-  Inbox,
-  Leaf,
-  LogOut,
-  Package,
-  Search,
-  Settings,
-  ShoppingCart,
-  Truck,
-  X,
-} from "lucide-react"
+import { ArrowRight, Check, Clock, Filter, Home, Leaf, LogOut, Package, Search, Settings, ShoppingCart, Truck, X } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { auth } from "@/lib/firebase"
 import { signOut, getAuth, onAuthStateChanged } from "firebase/auth"
+import {
+  ensureDynamicDataSeeded,
+  getOrdersForFarmer,
+  subscribeToDynamicData,
+  updateOrderStatus,
+  type OrderRecord,
+} from "@/lib/dynamic-data"
 
-// Sample order data
-const orders = [
-  {
-    id: "ORD-2023-001",
-    customerName: "Rahul Sharma",
-    customerPhone: "+91 98765 43210",
-    customerAddress: "123 Main Street, Delhi",
-    date: "2023-05-15",
-    status: "Pending",
-    total: 1200,
-    paymentMethod: "Cash on Delivery",
-    items: [
-      {
-        id: 1,
-        name: "Fresh Tomatoes",
-        price: 40,
-        quantity: 10,
-        unit: "kg",
-        total: 400,
-      },
-      {
-        id: 2,
-        name: "Organic Potatoes",
-        price: 30,
-        quantity: 15,
-        unit: "kg",
-        total: 450,
-      },
-      {
-        id: 3,
-        name: "Fresh Onions",
-        price: 35,
-        quantity: 10,
-        unit: "kg",
-        total: 350,
-      },
-    ],
-  },
-  {
-    id: "ORD-2023-002",
-    customerName: "Priya Patel",
-    customerPhone: "+91 87654 32109",
-    customerAddress: "456 Park Avenue, Mumbai",
-    date: "2023-05-14",
-    status: "Processing",
-    total: 900,
-    paymentMethod: "Online Payment",
-    items: [
-      {
-        id: 4,
-        name: "Organic Rice",
-        price: 60,
-        quantity: 15,
-        unit: "kg",
-        total: 900,
-      },
-    ],
-  },
-  {
-    id: "ORD-2023-003",
-    customerName: "Amit Singh",
-    customerPhone: "+91 76543 21098",
-    customerAddress: "789 Garden Road, Bangalore",
-    date: "2023-05-12",
-    status: "Shipped",
-    total: 1750,
-    paymentMethod: "Online Payment",
-    items: [
-      {
-        id: 1,
-        name: "Fresh Tomatoes",
-        price: 40,
-        quantity: 5,
-        unit: "kg",
-        total: 200,
-      },
-      {
-        id: 2,
-        name: "Organic Potatoes",
-        price: 30,
-        quantity: 10,
-        unit: "kg",
-        total: 300,
-      },
-      {
-        id: 3,
-        name: "Fresh Onions",
-        price: 35,
-        quantity: 5,
-        unit: "kg",
-        total: 175,
-      },
-      {
-        id: 4,
-        name: "Organic Rice",
-        price: 60,
-        quantity: 18,
-        unit: "kg",
-        total: 1080,
-      },
-    ],
-  },
-  {
-    id: "ORD-2023-004",
-    customerName: "Neha Gupta",
-    customerPhone: "+91 65432 10987",
-    customerAddress: "101 Lake View, Chennai",
-    date: "2023-05-10",
-    status: "Delivered",
-    total: 1400,
-    paymentMethod: "Cash on Delivery",
-    items: [
-      {
-        id: 1,
-        name: "Fresh Tomatoes",
-        price: 40,
-        quantity: 15,
-        unit: "kg",
-        total: 600,
-      },
-      {
-        id: 3,
-        name: "Fresh Onions",
-        price: 35,
-        quantity: 8,
-        unit: "kg",
-        total: 280,
-      },
-      {
-        id: 4,
-        name: "Organic Rice",
-        price: 60,
-        quantity: 8.5,
-        unit: "kg",
-        total: 510,
-      },
-    ],
-  },
-  {
-    id: "ORD-2023-005",
-    customerName: "Vikram Reddy",
-    customerPhone: "+91 54321 09876",
-    customerAddress: "234 Hill Road, Hyderabad",
-    date: "2023-05-08",
-    status: "Cancelled",
-    total: 750,
-    paymentMethod: "Online Payment",
-    items: [
-      {
-        id: 2,
-        name: "Organic Potatoes",
-        price: 30,
-        quantity: 25,
-        unit: "kg",
-        total: 750,
-      },
-    ],
-  },
-]
+type FarmerOrderView = {
+  id: string
+  customerName: string
+  customerPhone: string
+  customerAddress: string
+  date: string
+  status: "Pending" | "Processing" | "Shipped" | "Delivered" | "Cancelled"
+  total: number
+  paymentMethod: string
+  items: {
+    id: string
+    name: string
+    price: number
+    quantity: number
+    unit: string
+    total: number
+  }[]
+}
+
+const statusMap = {
+  pending: "Pending",
+  processing: "Processing",
+  shipped: "Shipped",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
+} as const
+
+const reverseStatusMap = {
+  Pending: "pending",
+  Processing: "processing",
+  Shipped: "shipped",
+  Delivered: "delivered",
+  Cancelled: "cancelled",
+} as const
 
 export default function FarmerOrders() {
   const [searchQuery, setSearchQuery] = useState("")
   const [activeTab, setActiveTab] = useState("all")
-  const [selectedOrder, setSelectedOrder] = useState<typeof orders[0] | null>(null)
+  const [selectedOrder, setSelectedOrder] = useState<FarmerOrderView | null>(null)
   const [isOrderDetailsOpen, setIsOrderDetailsOpen] = useState(false)
-  const [ordersList, setOrdersList] = useState(orders)
+  const [ordersList, setOrdersList] = useState<FarmerOrderView[]>([])
+  const [user, setUser] = useState<any>(null)
   const router = useRouter()
 
   const handleLogout = async () => {
     try {
       await signOut(auth)
-      router.push("/auth/login") // Redirect user after logout
+      router.push("/auth/login")
     } catch (error) {
       console.error("Error signing out:", error)
     }
   }
 
-  const useCurrentUser = () => {
-    const [user, setUser] = useState<any>(null)
-    const auth = getAuth()
+  useEffect(() => {
+    const authInstance = getAuth()
 
-    useEffect(() => {
-      const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-        if (firebaseUser) {
-          setUser({
-            uid: firebaseUser.uid,
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || null,
-            email: firebaseUser.email || null,
-            image: firebaseUser.photoURL || null,
-          })
-        } else {
-          setUser(null)
-        }
-      })
+    const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || null,
+          email: firebaseUser.email || null,
+          image: firebaseUser.photoURL || null,
+        })
+      } else {
+        setUser(null)
+      }
+    })
 
-      return () => unsubscribe()
-    }, [auth])
+    return () => unsubscribe()
+  }, [])
 
-    return user
-  }
-
-  const user = useCurrentUser()
   const userId = user?.uid
 
-  // View order details
-  const handleViewOrder = (order: SetStateAction<{ id: string; customerName: string; customerPhone: string; customerAddress: string; date: string; status: string; total: number; paymentMethod: string; items: { id: number; name: string; price: number; quantity: number; unit: string; total: number }[] } | null>) => {
+  useEffect(() => {
+    ensureDynamicDataSeeded()
+  }, [])
+
+  useEffect(() => {
+    if (!userId) {
+      setOrdersList([])
+      return
+    }
+
+    const syncOrders = () => {
+      const farmerOrders = [...getOrdersForFarmer(userId)]
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+        .map((order: OrderRecord) => {
+          const items = order.items.filter((item) => item.farmerId === userId)
+          return {
+            id: order.id,
+            customerName: order.consumerName,
+            customerPhone: order.consumerPhone,
+            customerAddress: `${order.deliveryAddress.address}, ${order.deliveryAddress.city}, ${order.deliveryAddress.state}`,
+            date: new Date(order.date).toLocaleDateString("en-IN"),
+            status: statusMap[order.status],
+            total: items.reduce((sum, item) => sum + item.price * item.quantity, 0),
+            paymentMethod: order.paymentMethod,
+            items: items.map((item) => ({
+              id: item.id,
+              name: item.name,
+              price: item.price,
+              quantity: item.quantity,
+              unit: item.unit,
+              total: item.price * item.quantity,
+            })),
+          }
+        })
+
+      setOrdersList(farmerOrders)
+    }
+
+    syncOrders()
+    return subscribeToDynamicData(syncOrders)
+  }, [userId])
+
+  const filteredOrders = useMemo(
+    () =>
+      ordersList.filter((order) => {
+        const matchesSearch =
+          order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          order.customerName.toLowerCase().includes(searchQuery.toLowerCase())
+
+        if (activeTab === "all") return matchesSearch
+        if (activeTab === "pending") return matchesSearch && order.status === "Pending"
+        if (activeTab === "processing") return matchesSearch && order.status === "Processing"
+        if (activeTab === "shipped") return matchesSearch && order.status === "Shipped"
+        if (activeTab === "delivered") return matchesSearch && order.status === "Delivered"
+        if (activeTab === "cancelled") return matchesSearch && order.status === "Cancelled"
+        return matchesSearch
+      }),
+    [activeTab, ordersList, searchQuery],
+  )
+
+  const handleViewOrder = (order: FarmerOrderView) => {
     setSelectedOrder(order)
     setIsOrderDetailsOpen(true)
   }
 
-  // Update order status
-  const handleUpdateStatus = (orderId: string, newStatus: string) => {
-    const updatedOrders = ordersList.map((order) => {
-      if (order.id === orderId) {
-        return { ...order, status: newStatus }
-      }
-      return order
-    })
-    setOrdersList(updatedOrders)
-
-    // If we're updating the currently selected order, update that too
-    if (selectedOrder && selectedOrder.id === orderId) {
+  const handleUpdateStatus = (orderId: string, newStatus: FarmerOrderView["status"]) => {
+    updateOrderStatus(orderId, reverseStatusMap[newStatus])
+    if (selectedOrder?.id === orderId) {
       setSelectedOrder({ ...selectedOrder, status: newStatus })
     }
   }
 
-  // Filter orders based on search query and active tab
-  const filteredOrders = ordersList.filter((order) => {
-    const matchesSearch =
-      order.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customerName.toLowerCase().includes(searchQuery.toLowerCase())
-
-    if (activeTab === "all") return matchesSearch
-    if (activeTab === "pending") return matchesSearch && order.status === "Pending"
-    if (activeTab === "processing") return matchesSearch && order.status === "Processing"
-    if (activeTab === "shipped") return matchesSearch && order.status === "Shipped"
-    if (activeTab === "delivered") return matchesSearch && order.status === "Delivered"
-    if (activeTab === "cancelled") return matchesSearch && order.status === "Cancelled"
-
-    return matchesSearch
-  })
-
-  // Get status badge color
   const getStatusColor = (status: string) => {
     switch (status) {
       case "Pending":
@@ -298,7 +185,6 @@ export default function FarmerOrders() {
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
       <aside className="hidden w-64 flex-col bg-gray-50 border-r md:flex">
         <div className="flex h-14 items-center border-b px-4">
           <Link href="/farmer/dashboard" className="flex items-center gap-2 font-semibold">
@@ -328,22 +214,20 @@ export default function FarmerOrders() {
                   Orders
                 </Button>
               </Link>
-              
             </div>
           </div>
-          
         </nav>
         <div className="border-t p-4">
           <div className="flex items-center gap-4 mb-4">
             <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-              {user?.photoURL ? (
-                <img src={user.photoURL || "/placeholder.svg"} alt="User" className="h-10 w-10 rounded-full" />
+              {user?.image ? (
+                <img src={user.image || "/placeholder.svg"} alt="User" className="h-10 w-10 rounded-full" />
               ) : (
-                <span className="text-sm font-semibold">{user?.displayName?.[0] || user?.email?.[0] || "U"}</span>
+                <span className="text-sm font-semibold">{user?.name?.[0] || user?.email?.[0] || "U"}</span>
               )}
             </div>
             <div>
-              <p className="text-sm font-medium">{user?.displayName || user?.email || "Unknown User"}</p>
+              <p className="text-sm font-medium">{user?.name || user?.email || "Unknown User"}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -360,7 +244,6 @@ export default function FarmerOrders() {
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 overflow-auto">
         <div className="flex h-14 items-center border-b px-4 md:h-16">
           <Button variant="outline" size="sm" className="mr-4 md:hidden">
@@ -377,7 +260,7 @@ export default function FarmerOrders() {
           </div>
 
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-            <Tabs defaultValue="all" className="w-full" onValueChange={setActiveTab}>
+            <Tabs value={activeTab} className="w-full" onValueChange={setActiveTab}>
               <TabsList className="grid grid-cols-3 md:grid-cols-6">
                 <TabsTrigger value="all">All Orders</TabsTrigger>
                 <TabsTrigger value="pending">Pending</TabsTrigger>
@@ -391,15 +274,9 @@ export default function FarmerOrders() {
             <div className="flex gap-2 w-full md:w-auto">
               <div className="relative flex-1 md:w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-                <Input
-                  type="search"
-                  placeholder="Search orders..."
-                  className="w-full pl-8"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
+                <Input type="search" placeholder="Search orders..." className="w-full pl-8" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
               </div>
-              <Button variant="outline" size="icon">
+              <Button variant="outline" size="icon" onClick={() => { setSearchQuery(""); setActiveTab("all") }}>
                 <Filter className="h-4 w-4" />
               </Button>
             </div>
@@ -424,7 +301,7 @@ export default function FarmerOrders() {
                       <TableCell className="font-medium">{order.id}</TableCell>
                       <TableCell>{order.date}</TableCell>
                       <TableCell>{order.customerName}</TableCell>
-                      <TableCell>₹{order.total.toFixed(2)}</TableCell>
+                      <TableCell>Rs. {order.total.toFixed(2)}</TableCell>
                       <TableCell>
                         <Badge className={getStatusColor(order.status)}>{order.status}</Badge>
                       </TableCell>
@@ -448,14 +325,11 @@ export default function FarmerOrders() {
           </div>
         </div>
 
-        {/* Order Details Dialog */}
         <Dialog open={isOrderDetailsOpen} onOpenChange={setIsOrderDetailsOpen}>
           <DialogContent className="sm:max-w-[700px]">
             <DialogHeader>
               <DialogTitle>Order Details</DialogTitle>
-              <DialogDescription>
-                Order ID: {selectedOrder?.id} | Date: {selectedOrder?.date}
-              </DialogDescription>
+              <DialogDescription>Order ID: {selectedOrder?.id} | Date: {selectedOrder?.date}</DialogDescription>
             </DialogHeader>
             {selectedOrder && (
               <div className="space-y-6">
@@ -463,30 +337,17 @@ export default function FarmerOrders() {
                   <div>
                     <h3 className="text-sm font-medium mb-2">Customer Information</h3>
                     <div className="space-y-1 text-sm">
-                      <p>
-                        <span className="font-medium">Name:</span> {selectedOrder.customerName}
-                      </p>
-                      <p>
-                        <span className="font-medium">Phone:</span> {selectedOrder.customerPhone}
-                      </p>
-                      <p>
-                        <span className="font-medium">Address:</span> {selectedOrder.customerAddress}
-                      </p>
+                      <p><span className="font-medium">Name:</span> {selectedOrder.customerName}</p>
+                      <p><span className="font-medium">Phone:</span> {selectedOrder.customerPhone}</p>
+                      <p><span className="font-medium">Address:</span> {selectedOrder.customerAddress}</p>
                     </div>
                   </div>
                   <div>
                     <h3 className="text-sm font-medium mb-2">Order Information</h3>
                     <div className="space-y-1 text-sm">
-                      <p>
-                        <span className="font-medium">Payment Method:</span> {selectedOrder.paymentMethod}
-                      </p>
-                      <p>
-                        <span className="font-medium">Status:</span>{" "}
-                        <Badge className={getStatusColor(selectedOrder.status)}>{selectedOrder.status}</Badge>
-                      </p>
-                      <p>
-                        <span className="font-medium">Total Amount:</span> ₹{selectedOrder.total.toFixed(2)}
-                      </p>
+                      <p><span className="font-medium">Payment Method:</span> {selectedOrder.paymentMethod}</p>
+                      <p><span className="font-medium">Status:</span> <Badge className={getStatusColor(selectedOrder.status)}>{selectedOrder.status}</Badge></p>
+                      <p><span className="font-medium">Total Amount:</span> Rs. {selectedOrder.total.toFixed(2)}</p>
                     </div>
                   </div>
                 </div>
@@ -507,20 +368,14 @@ export default function FarmerOrders() {
                         {selectedOrder.items.map((item) => (
                           <TableRow key={item.id}>
                             <TableCell>{item.name}</TableCell>
-                            <TableCell className="text-right">
-                              ₹{item.price}/{item.unit}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {item.quantity} {item.unit}
-                            </TableCell>
-                            <TableCell className="text-right">₹{item.total.toFixed(2)}</TableCell>
+                            <TableCell className="text-right">Rs. {item.price}/{item.unit}</TableCell>
+                            <TableCell className="text-right">{item.quantity} {item.unit}</TableCell>
+                            <TableCell className="text-right">Rs. {item.total.toFixed(2)}</TableCell>
                           </TableRow>
                         ))}
                         <TableRow>
-                          <TableCell colSpan={3} className="text-right font-medium">
-                            Total
-                          </TableCell>
-                          <TableCell className="text-right font-medium">₹{selectedOrder.total.toFixed(2)}</TableCell>
+                          <TableCell colSpan={3} className="text-right font-medium">Total</TableCell>
+                          <TableCell className="text-right font-medium">Rs. {selectedOrder.total.toFixed(2)}</TableCell>
                         </TableRow>
                       </TableBody>
                     </Table>
@@ -530,48 +385,23 @@ export default function FarmerOrders() {
                 <div>
                   <h3 className="text-sm font-medium mb-2">Update Order Status</h3>
                   <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={selectedOrder.status === "Pending" ? "bg-yellow-100" : ""}
-                      onClick={() => handleUpdateStatus(selectedOrder.id, "Pending")}
-                    >
+                    <Button variant="outline" size="sm" className={selectedOrder.status === "Pending" ? "bg-yellow-100" : ""} onClick={() => handleUpdateStatus(selectedOrder.id, "Pending")}>
                       <Clock className="mr-2 h-4 w-4" />
                       Pending
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={selectedOrder.status === "Processing" ? "bg-blue-100" : ""}
-                      onClick={() => handleUpdateStatus(selectedOrder.id, "Processing")}
-                    >
+                    <Button variant="outline" size="sm" className={selectedOrder.status === "Processing" ? "bg-blue-100" : ""} onClick={() => handleUpdateStatus(selectedOrder.id, "Processing")}>
                       <Package className="mr-2 h-4 w-4" />
                       Processing
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={selectedOrder.status === "Shipped" ? "bg-purple-100" : ""}
-                      onClick={() => handleUpdateStatus(selectedOrder.id, "Shipped")}
-                    >
+                    <Button variant="outline" size="sm" className={selectedOrder.status === "Shipped" ? "bg-purple-100" : ""} onClick={() => handleUpdateStatus(selectedOrder.id, "Shipped")}>
                       <Truck className="mr-2 h-4 w-4" />
                       Shipped
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={selectedOrder.status === "Delivered" ? "bg-green-100" : ""}
-                      onClick={() => handleUpdateStatus(selectedOrder.id, "Delivered")}
-                    >
+                    <Button variant="outline" size="sm" className={selectedOrder.status === "Delivered" ? "bg-green-100" : ""} onClick={() => handleUpdateStatus(selectedOrder.id, "Delivered")}>
                       <Check className="mr-2 h-4 w-4" />
                       Delivered
                     </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className={selectedOrder.status === "Cancelled" ? "bg-red-100" : ""}
-                      onClick={() => handleUpdateStatus(selectedOrder.id, "Cancelled")}
-                    >
+                    <Button variant="outline" size="sm" className={selectedOrder.status === "Cancelled" ? "bg-red-100" : ""} onClick={() => handleUpdateStatus(selectedOrder.id, "Cancelled")}>
                       <X className="mr-2 h-4 w-4" />
                       Cancelled
                     </Button>

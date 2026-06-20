@@ -3,11 +3,14 @@ import { persist } from "zustand/middleware"
 
 export type CartItem = {
   id: number
+  productId?: string
   name: string
   price: number
   quantity: number
   unit: string
   farmer: string
+  farmerId?: string
+  farmerEmail?: string
   image: string
 }
 

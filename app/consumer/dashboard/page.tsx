@@ -1,16 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
 import {
-  Bell,
-  Filter,
   Heart,
   Home,
   Leaf,
@@ -20,131 +16,122 @@ import {
   Search,
   Settings,
   ShoppingCart,
-  Star,
   User,
 } from "lucide-react"
 import { getAuth, onAuthStateChanged, signOut } from "firebase/auth"
 import { auth } from "@/lib/firebase"
-import { useStore, type CartItem, type FavoriteItem } from "@/lib/store"
-// Sample data
-const nearbyProducts = [
-  {
-    id: 1,
-    name: "Fresh Tomatoes",
-    farmer: "Rajesh Kumar",
-    location: "Punjab",
-    distance: "5 km",
-    price: "₹40/kg",
-    rating: 4.5,
-    image: "/placeholder.svg?height=200&width=200",
-  },
-  {
-    id: 2,
-    name: "Organic Potatoes",
-    farmer: "Suresh Singh",
-    location: "Haryana",
-    distance: "8 km",
-    price: "₹30/kg",
-    rating: 4.2,
-    image: "/placeholder.svg?height=200&width=200",
-  },
-  {
-    id: 3,
-    name: "Fresh Onions",
-    farmer: "Mahesh Patel",
-    location: "Gujarat",
-    distance: "12 km",
-    price: "₹35/kg",
-    rating: 4.0,
-    image: "/placeholder.svg?height=200&width=200",
-  },
-  {
-    id: 4,
-    name: "Organic Rice",
-    farmer: "Ramesh Yadav",
-    location: "Uttar Pradesh",
-    distance: "15 km",
-    price: "₹60/kg",
-    rating: 4.8,
-    image: "/placeholder.svg?height=200&width=200",
-  },
-]
+import { useStore } from "@/lib/store"
+import { ensureDynamicDataSeeded, getOrdersForConsumer, getProducts, subscribeToDynamicData } from "@/lib/dynamic-data"
 
-const recentOrders = [
-  {
-    id: "ORD-001",
-    items: "Tomatoes, Potatoes",
-    farmer: "Rajesh Kumar",
-    date: "2023-05-15",
-    status: "Delivered",
-    amount: "₹250",
-  },
-  {
-    id: "ORD-002",
-    items: "Rice, Wheat",
-    farmer: "Suresh Singh",
-    date: "2023-05-10",
-    status: "In Transit",
-    amount: "₹500",
-  },
-  {
-    id: "ORD-003",
-    items: "Onions, Garlic",
-    farmer: "Mahesh Patel",
-    date: "2023-05-05",
-    status: "Processing",
-    amount: "₹150",
-  },
-]
-
+type FavoriteFarmerView = {
+  name: string
+  location: string
+  email: string | null
+  favoriteCount: number
+  completedOrders: number
+}
 
 export default function ConsumerDashboard() {
-  const { cart, addToCart, favorites, addToFavorites, removeFromFavorites, isFavorite } = useStore()
-  const [activeTab, setActiveTab] = useState("discover")
+  const { cart, favorites } = useStore()
+  const [user, setUser] = useState<any>(null)
+  const [recentOrders, setRecentOrders] = useState<any[]>([])
+  const [favoriteFarmers, setFavoriteFarmers] = useState<FavoriteFarmerView[]>([])
   const router = useRouter()
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
-const handleLogout = async () => {
-  try {
-    await signOut(auth)
-    router.push("/auth/login") // Redirect user after logout
-  } catch (error) {
-    console.error("Error signing out:", error)
-    // Optional: Toast or alert
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth)
+      router.push("/auth/login")
+    } catch (error) {
+      console.error("Error signing out:", error)
+    }
   }
-}
-const useCurrentUser = () => {
-  const [user, setUser] = useState<any>(null);
-  const auth = getAuth();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const authInstance = getAuth()
+    const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
           uid: firebaseUser.uid,
-          id: firebaseUser.uid,
           name: firebaseUser.displayName || null,
           email: firebaseUser.email || null,
           image: firebaseUser.photoURL || null,
-        });
+        })
       } else {
-        setUser(null);
+        setUser(null)
       }
-    });
+    })
 
-    return () => unsubscribe();
-  }, [auth]);
+    return () => unsubscribe()
+  }, [])
 
-  return user;
-};
+  useEffect(() => {
+    ensureDynamicDataSeeded()
+  }, [])
 
-const user = useCurrentUser();
-const name = user?.name || "User";
+  useEffect(() => {
+    if (!user?.uid) {
+      setRecentOrders([])
+      setFavoriteFarmers([])
+      return
+    }
 
-const userId = user?.uid;
+    const syncDashboard = () => {
+      const orders = [...getOrdersForConsumer(user.uid)].sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+      )
+
+      setRecentOrders(
+        orders.slice(0, 5).map((order) => ({
+          id: order.id,
+          items: order.items.map((item) => item.name).join(", "),
+          farmer: order.items[0]?.farmer || "Farmer",
+          date: new Date(order.date).toLocaleDateString("en-IN"),
+          status:
+            order.status === "delivered"
+              ? "Delivered"
+              : order.status === "shipped"
+                ? "In Transit"
+                : order.status === "processing"
+                  ? "Processing"
+                  : order.status === "cancelled"
+                    ? "Cancelled"
+                    : "Pending",
+          amount: `Rs. ${order.total.toLocaleString()}`,
+        })),
+      )
+
+      const products = getProducts()
+      const farmerMap = new Map<string, FavoriteFarmerView>()
+
+      favorites.forEach((favorite) => {
+        const matchedProduct = products.find((item) => item.name === favorite.name && item.farmerName === favorite.farmer)
+        const completedOrders = orders.filter(
+          (order) => order.status === "delivered" && order.items.some((item) => item.farmer === favorite.farmer),
+        ).length
+
+        farmerMap.set(favorite.farmer, {
+          name: favorite.farmer,
+          location: matchedProduct?.location || favorite.location,
+          email: matchedProduct?.farmerEmail || null,
+          favoriteCount: (farmerMap.get(favorite.farmer)?.favoriteCount || 0) + 1,
+          completedOrders: Math.max(farmerMap.get(favorite.farmer)?.completedOrders || 0, completedOrders),
+        })
+      })
+
+      setFavoriteFarmers(Array.from(farmerMap.values()))
+    }
+
+    syncDashboard()
+    return subscribeToDynamicData(syncDashboard)
+  }, [favorites, user?.uid])
+
+  const name = user?.name || "User"
+  const primaryLocation = useMemo(() => favoriteFarmers[0]?.location || "All Locations", [favoriteFarmers])
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
       <aside className="hidden w-64 flex-col bg-gray-50 border-r md:flex">
         <div className="flex h-14 items-center border-b px-4">
           <Link href="/consumer/dashboard" className="flex items-center gap-2 font-semibold">
@@ -174,7 +161,6 @@ const userId = user?.uid;
                   My Cart
                 </Button>
               </Link>
-
               <Link href="/consumer/favorites">
                 <Button variant="secondary" className="w-full justify-start">
                   <Heart className="mr-2 h-4 w-4" />
@@ -188,85 +174,43 @@ const userId = user?.uid;
               </Link>
             </div>
           </div>
-          
         </nav>
         <div className="border-t p-4">
-  <div className="flex items-center gap-4 mb-4">
-    <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-      {user?.photoURL ? (
-        <img src={user.photoURL} alt="User" className="h-10 w-10 rounded-full" />
-      ) : (
-        <span className="text-sm font-semibold">
-          {user?.displayName?.[0] || user?.email?.[0] || "U"}
-        </span>
-      )}
-    </div>
-    <div>
-      <p className="text-sm font-medium">
-        {user?.displayName || user?.email || "Unknown User"}
-      </p>
-      {/* {!editingLocation ? (
-        <p className="text-xs text-gray-500">
-          {location || (
-            <button
-              className="text-blue-500 underline"
-              onClick={() => setEditingLocation(true)}
-            >
-              Add Location
-            </button>
-          )}
-        </p>
-      ) : (
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={newLocation}
-            onChange={(e) => setNewLocation(e.target.value)}
-            placeholder="Enter city"
-            className="text-xs border px-2 py-1 rounded"
-          />
-          <button
-            onClick={saveLocation}
-            className="text-blue-600 text-xs underline"
-          >
-            Save
-          </button>
+          <div className="flex items-center gap-4 mb-4">
+            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+              {user?.image ? (
+                <img src={user.image} alt="User" className="h-10 w-10 rounded-full" />
+              ) : (
+                <span className="text-sm font-semibold">{user?.name?.[0] || user?.email?.[0] || "U"}</span>
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-medium">{user?.name || user?.email || "Unknown User"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/consumer/settings">
+              <Button variant="outline" size="sm" className="w-full">
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </Button>
+            </Link>
+            <Button variant="outline" size="sm" onClick={handleLogout} className="text-red-600 hover:bg-red-100">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-      )} */}
-    </div>
-  </div>
-  <div className="flex items-center gap-2">
-    <Link href="/consumer/settings">
-      <Button variant="outline" size="sm" className="w-full">
-        <Settings className="mr-2 h-4 w-4" />
-        Settings
-      </Button>
-    </Link>
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleLogout}
-      className="text-red-600 hover:bg-red-100"
-    >
-      <LogOut className="h-4 w-4" />
-    </Button>
-  </div>
-</div>
-
-
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 overflow-auto">
         <div className="flex h-14 items-center border-b px-4 md:h-16">
           <Button variant="outline" size="sm" className="mr-4 md:hidden">
             <Leaf className="h-5 w-5 text-green-600" />
           </Button>
-          
           <div className="ml-auto flex items-center gap-4">
             <Button variant="outline" size="sm">
               <MapPin className="h-4 w-4 mr-2" />
-              Delhi
+              {primaryLocation}
             </Button>
             <Button variant="outline" size="sm" onClick={() => router.push("/consumer/cart")}>
               <ShoppingCart className="h-4 w-4" />
@@ -276,7 +220,6 @@ const userId = user?.uid;
                 </span>
               )}
             </Button>
-            
           </div>
         </div>
 
@@ -288,9 +231,8 @@ const userId = user?.uid;
             </div>
           </div>
 
-          <Tabs defaultValue="orders" className="mb-6" onValueChange={setActiveTab}>
+          <Tabs defaultValue="orders" className="mb-6">
             <TabsList>
-              
               <TabsTrigger value="orders">My Orders</TabsTrigger>
               <TabsTrigger value="farmers">Favorite Farmers</TabsTrigger>
             </TabsList>
@@ -328,28 +270,38 @@ const userId = user?.uid;
                                     ? "bg-green-100 text-green-800"
                                     : order.status === "In Transit"
                                       ? "bg-blue-100 text-blue-800"
-                                      : "bg-orange-100 text-orange-800"
+                                      : order.status === "Cancelled"
+                                        ? "bg-red-100 text-red-800"
+                                        : "bg-orange-100 text-orange-800"
                                 }`}
                               >
                                 {order.status}
                               </span>
                             </td>
+                            <td className="py-3 px-2">{order.amount}</td>
                             <td className="py-3 px-2">
-                              <Button variant="outline" size="sm">
+                              <Button variant="outline" size="sm" onClick={() => router.push("/consumer/myorders")}>
                                 View
                               </Button>
                             </td>
                           </tr>
                         ))}
+                        {recentOrders.length === 0 && (
+                          <tr>
+                            <td className="py-6 px-2 text-sm text-gray-500" colSpan={7}>
+                              No orders yet.
+                            </td>
+                          </tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Link href={"/consumer/myorders"}>
-                  <Button variant="outline" className="w-full">
-                    View All Orders
-                  </Button>
+                  <Link href="/consumer/myorders" className="w-full">
+                    <Button variant="outline" className="w-full">
+                      View All Orders
+                    </Button>
                   </Link>
                 </CardFooter>
               </Card>
@@ -363,65 +315,43 @@ const userId = user?.uid;
                 </CardHeader>
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <Card>
-                      <CardContent className="p-4 flex items-center gap-4">
-                        <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
-                          <User className="h-8 w-8" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold">Rajesh Kumar</h3>
-                          <p className="text-sm text-gray-500">Punjab</p>
-                          <div className="flex items-center gap-1 mt-1">
-                            <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                            <span className="text-sm">4.5</span>
+                    {favoriteFarmers.map((farmer) => (
+                      <Card key={farmer.name}>
+                        <CardContent className="p-4 flex items-center gap-4">
+                          <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
+                            <User className="h-8 w-8" />
                           </div>
-                        </div>
-                        <Button variant="outline" size="sm" className="ml-auto">
-                          <MessageSquare className="h-4 w-4" />
-                        </Button>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-4 flex items-center gap-4">
-                        <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
-                          <User className="h-8 w-8" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold">Suresh Singh</h3>
-                          <p className="text-sm text-gray-500">Haryana</p>
-                          <div className="flex items-center gap-1 mt-1">
-                            <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                            <span className="text-sm">4.2</span>
+                          <div>
+                            <h3 className="font-semibold">{farmer.name}</h3>
+                            <p className="text-sm text-gray-500">{farmer.location}</p>
+                            <div className="mt-1 text-sm text-gray-500">
+                              {farmer.favoriteCount} saved products
+                            </div>
+                            <div className="text-sm text-gray-500">{farmer.completedOrders} completed orders</div>
                           </div>
-                        </div>
-                        <Button variant="outline" size="sm" className="ml-auto">
-                          <MessageSquare className="h-4 w-4" />
-                        </Button>
-                      </CardContent>
-                    </Card>
-                    <Card>
-                      <CardContent className="p-4 flex items-center gap-4">
-                        <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
-                          <User className="h-8 w-8" />
-                        </div>
-                        <div>
-                          <h3 className="font-semibold">Mahesh Patel</h3>
-                          <p className="text-sm text-gray-500">Gujarat</p>
-                          <div className="flex items-center gap-1 mt-1">
-                            <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                            <span className="text-sm">4.0</span>
-                          </div>
-                        </div>
-                        <Button variant="outline" size="sm" className="ml-auto">
-                          <MessageSquare className="h-4 w-4" />
-                        </Button>
-                      </CardContent>
-                    </Card>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="ml-auto"
+                            onClick={() => {
+                              if (farmer.email) {
+                                window.location.href = `mailto:${farmer.email}`
+                                return
+                              }
+                              router.push("/consumer/favorites")
+                            }}
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {favoriteFarmers.length === 0 && <p className="text-sm text-gray-500">No favorite farmers yet.</p>}
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button variant="outline" className="w-full">
-                    View All Farmers
+                  <Button variant="outline" className="w-full" onClick={() => router.push("/consumer/favorites")}>
+                    View Favorites
                   </Button>
                 </CardFooter>
               </Card>

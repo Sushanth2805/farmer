@@ -30,47 +30,37 @@ export default function FavoritesPage() {
   const router = useRouter()
   const { toast } = useToast()
   const [searchQuery, setSearchQuery] = useState("")
+  const [user, setUser] = useState<any>(null)
   const { cart, addToCart, favorites, addToFavorites, removeFromFavorites, isFavorite } = useStore()
 
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
 
-const handleLogout = async () => {
-  try {
-    await signOut(auth)
-    router.push("/auth/login") // Redirect user after logout
-  } catch (error) {
-    console.error("Error signing out:", error)
-    // Optional: Toast or alert
+  const handleLogout = async () => {
+    try {
+      await signOut(auth)
+      router.push("/auth/login")
+    } catch (error) {
+      console.error("Error signing out:", error)
+    }
   }
-}
-const useCurrentUser = () => {
-  const [user, setUser] = useState<any>(null);
-  const auth = getAuth();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const authInstance = getAuth()
+    const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
       if (firebaseUser) {
         setUser({
           uid: firebaseUser.uid,
-          id: firebaseUser.uid,
           name: firebaseUser.displayName || null,
           email: firebaseUser.email || null,
           image: firebaseUser.photoURL || null,
-        });
+        })
       } else {
-        setUser(null);
+        setUser(null)
       }
-    });
+    })
 
-    return () => unsubscribe();
-  }, [auth]);
-
-  return user;
-};
-
-const user = useCurrentUser();
-
-const userId = user?.uid;
+    return () => unsubscribe()
+  }, [])
 
   // Filter favorites based on search
   const filteredFavorites = favorites.filter(
@@ -155,17 +145,17 @@ const userId = user?.uid;
         <div className="border-t p-4">
   <div className="flex items-center gap-4 mb-4">
     <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-      {user?.photoURL ? (
-        <img src={user.photoURL} alt="User" className="h-10 w-10 rounded-full" />
+      {user?.image ? (
+        <img src={user.image} alt="User" className="h-10 w-10 rounded-full" />
       ) : (
         <span className="text-sm font-semibold">
-          {user?.displayName?.[0] || user?.email?.[0] || "U"}
+          {user?.name?.[0] || user?.email?.[0] || "U"}
         </span>
       )}
     </div>
     <div>
       <p className="text-sm font-medium">
-        {user?.displayName || user?.email || "Unknown User"}
+        {user?.name || user?.email || "Unknown User"}
       </p>
       {/* {!editingLocation ? (
         <p className="text-xs text-gray-500">

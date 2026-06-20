@@ -1,9 +1,7 @@
 "use client"
 
 import { Label } from "@/components/ui/label"
-
-import { useState } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useMemo, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -11,162 +9,118 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AlertCircle, Calendar, FileText, Search } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
-
-// Sample tenders data
-const tenders = [
-  {
-    id: "TEN-001",
-    title: "Wheat Procurement - Delhi Region",
-    description: "Procurement of high-quality wheat for Delhi region ration shops",
-    product: "Wheat",
-    quantity: "500 tons",
-    budget: "₹1.5 Cr",
-    deadline: "2023-06-15",
-    status: "Open",
-    region: "Delhi",
-    minPrice: 30000,
-    maxPrice: 35000,
-    requirements: "Moisture content below 12%, Clean and free from foreign material, Must conform to FSSAI standards",
-  },
-  {
-    id: "TEN-002",
-    title: "Rice Procurement - Punjab",
-    description: "Procurement of basmati and non-basmati rice varieties for distribution",
-    product: "Rice",
-    quantity: "1000 tons",
-    budget: "₹3.2 Cr",
-    deadline: "2023-06-20",
-    status: "Open",
-    region: "Punjab",
-    minPrice: 32000,
-    maxPrice: 38000,
-    requirements: "Grade A quality, Maximum broken rice percentage 5%, Aged for minimum 6 months",
-  },
-  {
-    id: "TEN-003",
-    title: "Vegetable Supply - Maharashtra",
-    description: "Fresh vegetable supply for Mumbai and Pune ration shops",
-    product: "Vegetables (Mixed)",
-    quantity: "200 tons",
-    budget: "₹0.8 Cr",
-    deadline: "2023-06-10",
-    status: "Closing Soon",
-    region: "Maharashtra",
-    minPrice: 35000,
-    maxPrice: 45000,
-    requirements: "Freshly harvested within 48 hours, Organically grown preferred, Properly sorted and graded",
-  },
-  {
-    id: "TEN-004",
-    title: "Pulses Procurement - National",
-    description: "Procurement of various pulses for nationwide distribution",
-    product: "Pulses (Mixed)",
-    quantity: "300 tons",
-    budget: "₹1.8 Cr",
-    deadline: "2023-06-25",
-    status: "Open",
-    region: "National",
-    minPrice: 60000,
-    maxPrice: 65000,
-    requirements: "High protein content, Clean and properly dried, Free from infestation",
-  },
-]
-
-// Sample of farmer's bids
-const myBids = [
-  {
-    id: "BID-001",
-    tenderId: "TEN-001",
-    tenderTitle: "Wheat Procurement - Delhi Region",
-    quantity: "100 tons",
-    price: "₹32,000/ton",
-    totalValue: "₹32,00,000",
-    status: "Under Review",
-    submittedDate: "2023-05-10",
-    product: "Wheat",
-  },
-  {
-    id: "BID-002",
-    tenderId: "TEN-003",
-    tenderTitle: "Vegetable Supply - Maharashtra",
-    quantity: "50 tons",
-    price: "₹40,000/ton",
-    totalValue: "₹20,00,000",
-    status: "Accepted",
-    submittedDate: "2023-05-08",
-    product: "Vegetables (Mixed)",
-  },
-]
+import { getAuth, onAuthStateChanged } from "firebase/auth"
+import { ensureDynamicDataSeeded, getTenders, saveTenderBid, subscribeToDynamicData, type TenderRecord } from "@/lib/dynamic-data"
 
 export default function FarmerTendersPage() {
-  const router = useRouter()
   const { toast } = useToast()
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
-  const [selectedTender, setSelectedTender] = useState<null | any>(null)
-  const [bidDetails, setBidDetails] = useState({
-    quantity: "",
-    price: "",
-    notes: "",
-  })
+  const [selectedTender, setSelectedTender] = useState<TenderRecord | null>(null)
+  const [tenders, setTenders] = useState<TenderRecord[]>([])
+  const [bidDetails, setBidDetails] = useState({ quantity: "", price: "", notes: "" })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [showDialog, setShowDialog] = useState(false)
+  const [user, setUser] = useState<any>(null)
 
-  // Filter tenders based on search and status
-  const filteredTenders = tenders.filter((tender) => {
-    const matchesSearch =
-      tender.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tender.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      tender.product.toLowerCase().includes(searchQuery.toLowerCase())
-
-    const matchesStatus = statusFilter === "all" || tender.status.toLowerCase() === statusFilter.toLowerCase()
-
-    return matchesSearch && matchesStatus
-  })
-
-  // Handle selecting a tender for bidding
-  const handleSelectTender = (tender: { id?: string; title?: string; description?: string; product?: string; quantity?: string; budget?: string; deadline?: string; status?: string; region?: string; minPrice: any; maxPrice?: number; requirements?: string }) => {
-    setSelectedTender(tender)
-    setBidDetails({
-      quantity: "",
-      price: tender.minPrice.toString(),
-      notes: "",
+  useEffect(() => {
+    const auth = getAuth()
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || firebaseUser.email?.split("@")[0] || "Farmer",
+          email: firebaseUser.email || "unknown@example.com",
+        })
+      } else {
+        setUser(null)
+      }
     })
+
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    ensureDynamicDataSeeded()
+    const syncTenders = () => setTenders(getTenders())
+    syncTenders()
+    return subscribeToDynamicData(syncTenders)
+  }, [])
+
+  const filteredTenders = useMemo(
+    () =>
+      tenders.filter((tender) => {
+        const matchesSearch =
+          tender.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          tender.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          tender.product.toLowerCase().includes(searchQuery.toLowerCase())
+        const matchesStatus = statusFilter === "all" || tender.status.toLowerCase() === statusFilter.toLowerCase()
+        return matchesSearch && matchesStatus
+      }),
+    [searchQuery, statusFilter, tenders],
+  )
+
+  const myBids = useMemo(() => {
+    if (!user?.uid) return []
+
+    return tenders
+      .flatMap((tender) =>
+        tender.bids
+          .filter((bid) => bid.farmerId === user.uid)
+          .map((bid) => ({
+            id: bid.id,
+            tenderId: tender.id,
+            tenderTitle: tender.title,
+            quantity: bid.quantity,
+            price: bid.price,
+            totalValue: `Rs. ${bid.amount.toLocaleString()}`,
+            status: bid.status,
+            submittedDate: new Date(bid.createdAt).toLocaleDateString("en-IN"),
+            submittedAt: bid.createdAt,
+            product: tender.product,
+          })),
+      )
+      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+  }, [tenders, user?.uid])
+
+  const handleSelectTender = (tender: TenderRecord) => {
+    setSelectedTender(tender)
+    setBidDetails({ quantity: "", price: tender.minPrice.toString(), notes: "" })
     setShowDialog(true)
   }
 
-  // Handle bid form input changes
-  const handleBidInputChange = (e: { target: { name: any; value: any } }) => {
+  const handleBidInputChange = (e: { target: { name: string; value: string } }) => {
     const { name, value } = e.target
     setBidDetails((prev) => ({ ...prev, [name]: value }))
   }
 
-  // Handle bid submission
   const handleBidSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault()
+    if (!selectedTender || !user?.uid) {
+      return
+    }
+
     setIsSubmitting(true)
 
-    // Simulate API call
-    setTimeout(() => {
-      setIsSubmitting(false)
-      setShowDialog(false)
+    saveTenderBid(selectedTender.id, {
+      farmerId: user.uid,
+      farmerName: user.name,
+      farmerEmail: user.email,
+      quantity: `${bidDetails.quantity} tons`,
+      price: `Rs. ${Number(bidDetails.price).toLocaleString()}/ton`,
+      amount: Number(bidDetails.quantity) * Number(bidDetails.price),
+      notes: bidDetails.notes,
+    })
 
-      toast({
-        title: "Bid submitted successfully",
-        description: `Your bid for ${selectedTender.title} has been submitted and is under review.`,
-      })
+    setIsSubmitting(false)
+    setShowDialog(false)
 
-      // In a real app, we would refresh the data
-    }, 1500)
+    toast({
+      title: "Bid submitted successfully",
+      description: `Your bid for ${selectedTender.title} has been submitted and is under review.`,
+    })
   }
 
   return (
@@ -181,36 +135,12 @@ export default function FarmerTendersPage() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
         <div className="relative w-full md:w-auto md:flex-1 max-w-md">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" />
-          <Input
-            type="search"
-            placeholder="Search tenders by ID, title, or product..."
-            className="w-full pl-8"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
+          <Input type="search" placeholder="Search tenders by ID, title, or product..." className="w-full pl-8" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
         </div>
         <div className="flex gap-2 w-full md:w-auto">
-          <Button
-            variant={statusFilter === "all" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setStatusFilter("all")}
-          >
-            All
-          </Button>
-          <Button
-            variant={statusFilter === "open" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setStatusFilter("open")}
-          >
-            Open
-          </Button>
-          <Button
-            variant={statusFilter === "closing soon" ? "default" : "outline"}
-            size="sm"
-            onClick={() => setStatusFilter("closing soon")}
-          >
-            Closing Soon
-          </Button>
+          <Button variant={statusFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setStatusFilter("all")}>All</Button>
+          <Button variant={statusFilter === "open" ? "default" : "outline"} size="sm" onClick={() => setStatusFilter("open")}>Open</Button>
+          <Button variant={statusFilter === "closing soon" ? "default" : "outline"} size="sm" onClick={() => setStatusFilter("closing soon")}>Closing Soon</Button>
         </div>
       </div>
 
@@ -220,7 +150,6 @@ export default function FarmerTendersPage() {
           <TabsTrigger value="mybids">My Bids</TabsTrigger>
         </TabsList>
 
-        {/* Available Tenders Tab */}
         <TabsContent value="available" className="space-y-4">
           {filteredTenders.map((tender) => (
             <Card key={tender.id} className="mb-4">
@@ -228,19 +157,9 @@ export default function FarmerTendersPage() {
                 <div className="flex flex-col md:flex-row md:items-start justify-between">
                   <div>
                     <CardTitle>{tender.title}</CardTitle>
-                    <CardDescription>
-                      {tender.id} • {tender.product} • {tender.region}
-                    </CardDescription>
+                    <CardDescription>{tender.id} • {tender.product} • {tender.region}</CardDescription>
                   </div>
-                  <Badge
-                    className={
-                      tender.status === "Open"
-                        ? "mt-2 md:mt-0 bg-green-100 text-green-800 hover:bg-green-100"
-                        : tender.status === "Closing Soon"
-                          ? "mt-2 md:mt-0 bg-orange-100 text-orange-800 hover:bg-orange-100"
-                          : "mt-2 md:mt-0 bg-red-100 text-red-800 hover:bg-red-100"
-                    }
-                  >
+                  <Badge className={tender.status === "Open" ? "mt-2 md:mt-0 bg-green-100 text-green-800 hover:bg-green-100" : tender.status === "Closing Soon" ? "mt-2 md:mt-0 bg-orange-100 text-orange-800 hover:bg-orange-100" : "mt-2 md:mt-0 bg-red-100 text-red-800 hover:bg-red-100"}>
                     {tender.status}
                   </Badge>
                 </div>
@@ -268,9 +187,7 @@ export default function FarmerTendersPage() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-sm text-gray-500">Price Range:</span>
-                        <span className="text-sm">
-                          ₹{tender.minPrice.toLocaleString()} - ₹{tender.maxPrice.toLocaleString()}/ton
-                        </span>
+                        <span className="text-sm">Rs. {tender.minPrice.toLocaleString()} - Rs. {tender.maxPrice.toLocaleString()}/ton</span>
                       </div>
                     </div>
                   </div>
@@ -305,34 +222,19 @@ export default function FarmerTendersPage() {
               <AlertCircle className="h-12 w-12 text-gray-300 mb-4" />
               <h2 className="text-xl font-medium mb-2">No tenders found</h2>
               <p className="text-gray-500 mb-6">Try adjusting your search criteria</p>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setSearchQuery("")
-                  setStatusFilter("all")
-                }}
-              >
+              <Button variant="outline" onClick={() => { setSearchQuery(""); setStatusFilter("all") }}>
                 Reset Filters
               </Button>
             </div>
           )}
         </TabsContent>
 
-        {/* My Bids Tab */}
         <TabsContent value="mybids" className="space-y-4">
           {myBids.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12">
               <FileText className="h-12 w-12 text-gray-300 mb-4" />
               <h2 className="text-xl font-medium mb-2">No bids yet</h2>
-              <p className="text-gray-500 mb-6">You haven't applied for any tenders yet</p>
-              <Button
-                onClick={() => {
-                  const button = document.querySelector('button[value="available"]') as HTMLButtonElement | null;
-                  button?.click();
-                }}
-              >
-                Browse Tenders
-              </Button>
+              <p className="text-gray-500 mb-6">You haven&apos;t applied for any tenders yet</p>
             </div>
           ) : (
             <Card>
@@ -369,15 +271,7 @@ export default function FarmerTendersPage() {
                           <td className="py-3 px-2">{bid.totalValue}</td>
                           <td className="py-3 px-2">{bid.submittedDate}</td>
                           <td className="py-3 px-2">
-                            <Badge
-                              className={
-                                bid.status === "Accepted"
-                                  ? "bg-green-100 text-green-800 hover:bg-green-100"
-                                  : bid.status === "Rejected"
-                                    ? "bg-red-100 text-red-800 hover:bg-red-100"
-                                    : "bg-blue-100 text-blue-800 hover:bg-blue-100"
-                              }
-                            >
+                            <Badge className={bid.status === "Accepted" ? "bg-green-100 text-green-800 hover:bg-green-100" : bid.status === "Rejected" ? "bg-red-100 text-red-800 hover:bg-red-100" : "bg-blue-100 text-blue-800 hover:bg-blue-100"}>
                               {bid.status}
                             </Badge>
                           </td>
@@ -392,63 +286,26 @@ export default function FarmerTendersPage() {
         </TabsContent>
       </Tabs>
 
-      {/* Bid Application Dialog */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle>Apply for Tender</DialogTitle>
-            <DialogDescription>
-              {selectedTender?.title} ({selectedTender?.id})
-            </DialogDescription>
+            <DialogDescription>{selectedTender?.title} ({selectedTender?.id})</DialogDescription>
           </DialogHeader>
 
           <form onSubmit={handleBidSubmit}>
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="quantity" className="text-right">
-                  Quantity (tons)
-                </Label>
-                <Input
-                  id="quantity"
-                  name="quantity"
-                  type="number"
-                  min="1"
-                  max={selectedTender?.quantity?.replace(/\D/g, "")}
-                  value={bidDetails.quantity}
-                  onChange={handleBidInputChange}
-                  className="col-span-3"
-                  required
-                />
+                <Label htmlFor="quantity" className="text-right">Quantity (tons)</Label>
+                <Input id="quantity" name="quantity" type="number" min="1" max={selectedTender?.quantity?.replace(/\D/g, "")} value={bidDetails.quantity} onChange={handleBidInputChange} className="col-span-3" required />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="price" className="text-right">
-                  Price per ton (₹)
-                </Label>
-                <Input
-                  id="price"
-                  name="price"
-                  type="number"
-                  min={selectedTender?.minPrice}
-                  max={selectedTender?.maxPrice}
-                  value={bidDetails.price}
-                  onChange={handleBidInputChange}
-                  className="col-span-3"
-                  required
-                />
+                <Label htmlFor="price" className="text-right">Price per ton (Rs.)</Label>
+                <Input id="price" name="price" type="number" min={selectedTender?.minPrice} max={selectedTender?.maxPrice} value={bidDetails.price} onChange={handleBidInputChange} className="col-span-3" required />
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="notes" className="text-right">
-                  Notes
-                </Label>
-                <Textarea
-                  id="notes"
-                  name="notes"
-                  placeholder="Additional details about your bid"
-                  value={bidDetails.notes}
-                  onChange={handleBidInputChange}
-                  className="col-span-3"
-                  rows={3}
-                />
+                <Label htmlFor="notes" className="text-right">Notes</Label>
+                <Textarea id="notes" name="notes" placeholder="Additional details about your bid" value={bidDetails.notes} onChange={handleBidInputChange} className="col-span-3" rows={3} />
               </div>
 
               {bidDetails.quantity && bidDetails.price && (
@@ -457,9 +314,7 @@ export default function FarmerTendersPage() {
                     <span className="text-sm font-medium">Total Value:</span>
                   </div>
                   <div className="col-span-3">
-                    <span className="text-lg font-bold">
-                      ₹{(Number.parseInt(bidDetails.quantity) * Number.parseInt(bidDetails.price)).toLocaleString()}
-                    </span>
+                    <span className="text-lg font-bold">Rs. {(Number.parseInt(bidDetails.quantity) * Number.parseInt(bidDetails.price)).toLocaleString()}</span>
                   </div>
                 </div>
               )}
@@ -470,10 +325,7 @@ export default function FarmerTendersPage() {
                     <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5" />
                     <div>
                       <h4 className="font-medium text-amber-800">Important Note</h4>
-                      <p className="text-sm text-amber-700">
-                        By submitting this bid, you are committing to deliver the specified quantity at the price
-                        mentioned above if your bid is accepted.
-                      </p>
+                      <p className="text-sm text-amber-700">By submitting this bid, you are committing to deliver the specified quantity at the price mentioned above if your bid is accepted.</p>
                     </div>
                   </div>
                 </div>
@@ -481,12 +333,8 @@ export default function FarmerTendersPage() {
             </div>
 
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setShowDialog(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Submitting..." : "Submit Bid"}
-              </Button>
+              <Button type="button" variant="outline" onClick={() => setShowDialog(false)}>Cancel</Button>
+              <Button type="submit" disabled={isSubmitting}>{isSubmitting ? "Submitting..." : "Submit Bid"}</Button>
             </DialogFooter>
           </form>
         </DialogContent>

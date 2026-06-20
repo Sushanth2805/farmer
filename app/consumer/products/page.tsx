@@ -1,23 +1,20 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import {
-  Bell,
   Filter,
   Heart,
   Home,
   Leaf,
   LogOut,
   MapPin,
-  MessageSquare,
   Search,
   Settings,
   ShoppingCart,
-  User,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Slider } from "@/components/ui/slider"
@@ -30,203 +27,111 @@ import { useStore, type CartItem, type FavoriteItem } from "@/lib/store"
 import { useRouter } from "next/navigation"
 import { auth } from "@/lib/firebase"
 import { signOut, getAuth, onAuthStateChanged } from "firebase/auth"
+import { ensureDynamicDataSeeded, getProducts, subscribeToDynamicData, type ProductRecord } from "@/lib/dynamic-data"
 
-// Sample data
-const products = [
-  {
-    id: 1,
-    name: "Fresh Tomatoes",
-    farmer: "Rajesh Kumar",
-    location: "Punjab",
-    distance: 5,
-    price: 40,
-    unit: "kg",
-    rating: 4.5,
-    category: "Vegetables",
-    freshness: "1 day ago",
-    image: "/tomato.png?height=200&width=200",
-  },
-  {
-    id: 2,
-    name: "Organic Potatoes",
-    farmer: "Suresh Singh",
-    location: "Haryana",
-    distance: 8,
-    price: 30,
-    unit: "kg",
-    rating: 4.2,
-    category: "Vegetables",
-    freshness: "2 days ago",
-    image: "/potato.png?height=200&width=200",
-  },
-  {
-    id: 3,
-    name: "Fresh Onions",
-    farmer: "Mahesh Patel",
-    location: "Gujarat",
-    distance: 12,
-    price: 35,
-    unit: "kg",
-    rating: 4.0,
-    category: "Vegetables",
-    freshness: "1 day ago",
-    image: "/onions.png?height=200&width=200",
-  },
-  {
-    id: 4,
-    name: "Organic Rice",
-    farmer: "Ramesh Yadav",
-    location: "Uttar Pradesh",
-    distance: 15,
-    price: 60,
-    unit: "kg",
-    rating: 4.8,
-    category: "Grains",
-    freshness: "10 days ago",
-    image: "/rice.png?height=200&width=200",
-  },
-  {
-    id: 5,
-    name: "Carrots",
-    farmer: "Rajesh Kumar",
-    location: "punjab",
-    distance: 5,
-    price: 80,
-    unit: "kg",
-    rating: 4.6,
-    category: "vegetables",
-    freshness: "3 days ago",
-    image: "/carrot.png?height=200&width=200",
-  },
-  {
-    id: 6,
-    name: "Organic Wheat",
-    farmer: "Vijay Singh",
-    location: "Punjab",
-    distance: 7,
-    price: 45,
-    unit: "kg",
-    rating: 4.3,
-    category: "Grains",
-    freshness: "15 days ago",
-    image: "/download.png?height=200&width=200",
-  },
-  {
-    id: 7,
-    name: "Fresh Mangoes",
-    farmer: "Ravi Patel",
-    location: "Maharashtra",
-    distance: 25,
-    price: 120,
-    unit: "kg",
-    rating: 4.9,
-    category: "Fruits",
-    freshness: "1 day ago",
-    image: "/mangoes.png?height=200&width=200",
-  },
-  {
-    id: 8,
-    name: "Organic Milk",
-    farmer: "Sanjay Yadav",
-    location: "Haryana",
-    distance: 10,
-    price: 50,
-    unit: "liter",
-    rating: 4.7,
-    category: "Dairy",
-    freshness: "Today",
-    image: "/milk.png?height=200&width=200",
-  },
-]
+type DiscoverProduct = ProductRecord & {
+  farmer: string
+  distance: number
+  rating: number
+  freshness: string
+}
 
-const categories = ["Vegetables", "Fruits", "Grains", "Dairy", "Spices"]
-const locations = ["Delhi", "Punjab", "Haryana", "Uttar Pradesh", "Gujarat", "Maharashtra", "Himachal Pradesh"]
+function getFreshnessLabel(harvestDate: string) {
+  const diffDays = Math.max(
+    0,
+    Math.floor((Date.now() - new Date(harvestDate).getTime()) / (1000 * 60 * 60 * 24)),
+  )
+
+  if (diffDays === 0) return "Today"
+  if (diffDays === 1) return "1 day ago"
+  return `${diffDays} days ago`
+}
+
+function buildDiscoverProducts(products: ProductRecord[]): DiscoverProduct[] {
+  return products
+    .filter((product) => product.quantity > 0)
+    .map((product, index) => ({
+      ...product,
+      farmer: product.farmerName,
+      distance: 4 + (index % 8) * 3,
+      rating: 4 + ((index % 5) * 0.2),
+      freshness: getFreshnessLabel(product.harvestDate),
+    }))
+}
 
 export default function ConsumerProducts() {
   const { toast } = useToast()
   const [searchQuery, setSearchQuery] = useState("")
   const [locationQuery, setLocationQuery] = useState("")
   const [showLocationSearch, setShowLocationSearch] = useState(false)
+  const [products, setProducts] = useState<DiscoverProduct[]>([])
+  const [user, setUser] = useState<any>(null)
   const router = useRouter()
-  
+
   const handleLogout = async () => {
     try {
       await signOut(auth)
-      router.push("/auth/login") // Redirect user after logout
+      router.push("/auth/login")
     } catch (error) {
       console.error("Error signing out:", error)
-      // Optional: Toast or alert
     }
   }
-  const useCurrentUser = () => {
-    const [user, setUser] = useState<any>(null);
-    const auth = getAuth();
-  
-    useEffect(() => {
-      const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-        if (firebaseUser) {
-          setUser({
-            uid: firebaseUser.uid,
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || null,
-            email: firebaseUser.email || null,
-            image: firebaseUser.photoURL || null,
-          });
-        } else {
-          setUser(null);
-        }
-      });
-  
-      return () => unsubscribe();
-    }, [auth]);
-  
-    return user;
-  };
-  
-  const user = useCurrentUser();
-  
-  const userId = user?.uid;
-  const [filters, setFilters] = useState<{
-    categories: string[]
-    maxDistance: number
-    priceRange: [number, number]
-    minRating: number
-  }>({
-    categories: [],
+
+  const [filters, setFilters] = useState({
+    categories: [] as string[],
     maxDistance: 50,
-    priceRange: [0, 200],
+    priceRange: [0, 200] as [number, number],
     minRating: 0,
   })
   const [sortBy, setSortBy] = useState("distance")
 
-  // Get store functions
   const { cart, addToCart, favorites, addToFavorites, removeFromFavorites, isFavorite } = useStore()
-
-  // Calculate cart count
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0)
 
-  // Filter and sort products
+  useEffect(() => {
+    const authInstance = getAuth()
+    const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || null,
+          email: firebaseUser.email || null,
+          image: firebaseUser.photoURL || null,
+        })
+      } else {
+        setUser(null)
+      }
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    ensureDynamicDataSeeded()
+    const syncProducts = () => setProducts(buildDiscoverProducts(getProducts()))
+    syncProducts()
+    return subscribeToDynamicData(syncProducts)
+  }, [])
+
+  const categories = useMemo(
+    () => Array.from(new Set(products.map((product) => product.category))).sort(),
+    [products],
+  )
+  const locations = useMemo(
+    () => Array.from(new Set(products.map((product) => product.location))).sort(),
+    [products],
+  )
+
   const filteredProducts = products
     .filter((product) => {
-      // Search filter
       const matchesSearch =
         product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         product.farmer.toLowerCase().includes(searchQuery.toLowerCase()) ||
         product.location.toLowerCase().includes(searchQuery.toLowerCase())
-
-      // Location filter
       const matchesLocation = !locationQuery || product.location.toLowerCase().includes(locationQuery.toLowerCase())
-
-      // Category filter
       const matchesCategory = filters.categories.length === 0 || filters.categories.includes(product.category)
-
-      // Distance filter
       const matchesDistance = product.distance <= filters.maxDistance
-
-      // Price filter
       const matchesPrice = product.price >= filters.priceRange[0] && product.price <= filters.priceRange[1]
-
-      // Rating filter
       const matchesRating = product.rating >= filters.minRating
 
       return matchesSearch && matchesLocation && matchesCategory && matchesDistance && matchesPrice && matchesRating
@@ -236,33 +141,30 @@ export default function ConsumerProducts() {
       if (sortBy === "price_low") return a.price - b.price
       if (sortBy === "price_high") return b.price - a.price
       if (sortBy === "rating") return b.rating - a.rating
-      if (sortBy === "freshness") {
-        // Simple sorting for freshness (in a real app, you'd use actual dates)
-        const freshnessOrder = { Today: 0, "1 day ago": 1, "2 days ago": 2, "3 days ago": 3 }
-        return ((freshnessOrder[a.freshness as keyof typeof freshnessOrder] ?? 999) -
-                (freshnessOrder[b.freshness as keyof typeof freshnessOrder] ?? 999))
-      }
+      if (sortBy === "freshness") return new Date(b.harvestDate).getTime() - new Date(a.harvestDate).getTime()
       return 0
     })
 
   const toggleCategory = (category: string) => {
-    setFilters((prev) => {
-      const categories = prev.categories.includes(category)
-        ? prev.categories.filter((c) => c !== category)
-        : [...prev.categories, category]
-
-      return { ...prev, categories }
-    })
+    setFilters((prev) => ({
+      ...prev,
+      categories: prev.categories.includes(category)
+        ? prev.categories.filter((item) => item !== category)
+        : [...prev.categories, category],
+    }))
   }
 
-  const handleAddToCart = (product: { id: any; name: any; farmer: any; location?: string; distance?: number; price: any; unit: any; rating?: number; category?: string; freshness?: string; image: any }) => {
+  const handleAddToCart = (product: DiscoverProduct) => {
     const cartItem: CartItem = {
-      id: product.id,
+      id: Number(product.id.replace(/\D/g, "").slice(-9) || Date.now()),
+      productId: product.id,
       name: product.name,
       price: product.price,
       quantity: 1,
       unit: product.unit,
       farmer: product.farmer,
+      farmerId: product.ownerId,
+      farmerEmail: product.farmerEmail,
       image: product.image,
     }
 
@@ -273,9 +175,9 @@ export default function ConsumerProducts() {
     })
   }
 
-  const handleToggleFavorite = (product: { id: any; name: any; farmer: any; location: any; distance?: number; price: any; unit: any; rating?: number; category?: string; freshness?: string; image: any }) => {
+  const handleToggleFavorite = (product: DiscoverProduct) => {
     const favoriteItem: FavoriteItem = {
-      id: product.id,
+      id: Number(product.id.replace(/\D/g, "").slice(-9) || Date.now()),
       name: product.name,
       farmer: product.farmer,
       location: product.location,
@@ -284,8 +186,8 @@ export default function ConsumerProducts() {
       image: product.image,
     }
 
-    if (isFavorite(product.id)) {
-      removeFromFavorites(product.id)
+    if (isFavorite(favoriteItem.id)) {
+      removeFromFavorites(favoriteItem.id)
       toast({
         title: "Removed from favorites",
         description: `${product.name} has been removed from your favorites.`,
@@ -301,7 +203,6 @@ export default function ConsumerProducts() {
 
   return (
     <div className="flex min-h-screen">
-      {/* Sidebar */}
       <aside className="hidden w-64 flex-col bg-gray-50 border-r lg:flex">
         <div className="flex h-14 items-center border-b px-4">
           <Link href="/consumer/dashboard" className="flex items-center gap-2 font-semibold">
@@ -329,9 +230,6 @@ export default function ConsumerProducts() {
                 <Button variant="ghost" className="w-full justify-start">
                   <ShoppingCart className="mr-2 h-4 w-4" />
                   My Orders
-                  <span className="ml-auto bg-primary text-primary-foreground rounded-full w-5 h-5 flex items-center justify-center text-xs">
-                    2
-                  </span>
                 </Button>
               </Link>
               <Link href="/consumer/favorites">
@@ -347,74 +245,34 @@ export default function ConsumerProducts() {
               </Link>
             </div>
           </div>
-          
         </nav>
         <div className="border-t p-4">
-  <div className="flex items-center gap-4 mb-4">
-    <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-      {user?.photoURL ? (
-        <img src={user.photoURL} alt="User" className="h-10 w-10 rounded-full" />
-      ) : (
-        <span className="text-sm font-semibold">
-          {user?.displayName?.[0] || user?.email?.[0] || "U"}
-        </span>
-      )}
-    </div>
-    <div>
-      <p className="text-sm font-medium">
-        {user?.displayName || user?.email || "Unknown User"}
-      </p>
-      {/* {!editingLocation ? (
-        <p className="text-xs text-gray-500">
-          {location || (
-            <button
-              className="text-blue-500 underline"
-              onClick={() => setEditingLocation(true)}
-            >
-              Add Location
-            </button>
-          )}
-        </p>
-      ) : (
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={newLocation}
-            onChange={(e) => setNewLocation(e.target.value)}
-            placeholder="Enter city"
-            className="text-xs border px-2 py-1 rounded"
-          />
-          <button
-            onClick={saveLocation}
-            className="text-blue-600 text-xs underline"
-          >
-            Save
-          </button>
+          <div className="flex items-center gap-4 mb-4">
+            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+              {user?.image ? (
+                <img src={user.image} alt="User" className="h-10 w-10 rounded-full" />
+              ) : (
+                <span className="text-sm font-semibold">{user?.name?.[0] || user?.email?.[0] || "U"}</span>
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-medium">{user?.name || user?.email || "Unknown User"}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link href="/consumer/settings">
+              <Button variant="outline" size="sm" className="w-full">
+                <Settings className="mr-2 h-4 w-4" />
+                Settings
+              </Button>
+            </Link>
+            <Button variant="outline" size="sm" onClick={handleLogout} className="text-red-600 hover:bg-red-100">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
-      )} */}
-    </div>
-  </div>
-  <div className="flex items-center gap-2">
-    <Link href="/consumer/settings">
-      <Button variant="outline" size="sm" className="w-full">
-        <Settings className="mr-2 h-4 w-4" />
-        Settings
-      </Button>
-    </Link>
-    <Button
-      variant="outline"
-      size="sm"
-      onClick={handleLogout}
-      className="text-red-600 hover:bg-red-100"
-    >
-      <LogOut className="h-4 w-4" />
-    </Button>
-  </div>
-</div>
-
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 overflow-auto">
         <div className="flex h-14 items-center border-b px-4 md:h-16">
           <Button variant="outline" size="sm" className="mr-4 lg:hidden">
@@ -443,11 +301,9 @@ export default function ConsumerProducts() {
                 </span>
               )}
             </Button>
-            
           </div>
         </div>
 
-        {/* Location search dropdown */}
         {showLocationSearch && (
           <div className="p-4 border-b">
             <div className="flex flex-col space-y-2">
@@ -536,29 +392,15 @@ export default function ConsumerProducts() {
                         <h3 className="text-sm font-medium">Maximum Distance</h3>
                         <span className="text-sm">{filters.maxDistance} km</span>
                       </div>
-                      <Slider
-                        value={[filters.maxDistance]}
-                        min={1}
-                        max={50}
-                        step={1}
-                        onValueChange={(value) => setFilters((prev) => ({ ...prev, maxDistance: value[0] }))}
-                      />
+                      <Slider value={[filters.maxDistance]} min={1} max={50} step={1} onValueChange={(value) => setFilters((prev) => ({ ...prev, maxDistance: value[0] }))} />
                     </div>
 
                     <div className="space-y-4">
                       <div className="flex justify-between items-center">
                         <h3 className="text-sm font-medium">Price Range</h3>
-                        <span className="text-sm">
-                          ₹{filters.priceRange[0]} - ₹{filters.priceRange[1]}
-                        </span>
+                        <span className="text-sm">₹{filters.priceRange[0]} - ₹{filters.priceRange[1]}</span>
                       </div>
-                      <Slider
-                        value={filters.priceRange}
-                        min={0}
-                        max={200}
-                        step={5}
-                        onValueChange={(value: [number, number]) => setFilters((prev) => ({ ...prev, priceRange: value }))}
-                      />
+                      <Slider value={filters.priceRange} min={0} max={200} step={5} onValueChange={(value: [number, number]) => setFilters((prev) => ({ ...prev, priceRange: value }))} />
                     </div>
 
                     <div className="space-y-4">
@@ -566,13 +408,7 @@ export default function ConsumerProducts() {
                         <h3 className="text-sm font-medium">Minimum Rating</h3>
                         <span className="text-sm">{filters.minRating} ★</span>
                       </div>
-                      <Slider
-                        value={[filters.minRating]}
-                        min={0}
-                        max={5}
-                        step={0.5}
-                        onValueChange={(value) => setFilters((prev) => ({ ...prev, minRating: value[0] }))}
-                      />
+                      <Slider value={[filters.minRating]} min={0} max={5} step={0.5} onValueChange={(value) => setFilters((prev) => ({ ...prev, minRating: value[0] }))} />
                     </div>
 
                     <Button
@@ -595,45 +431,38 @@ export default function ConsumerProducts() {
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {filteredProducts.map((product) => (
-              <Card key={product.id} className="overflow-hidden">
-                <CardContent className="flex flex-col items-center p-4">
-                  <div className="relative w-full">
-                    <img
-                      src={product.image || "/placeholder.svg"}
-                      alt={product.name}
-                      className="w-full h-40 object-cover mb-4"
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={`absolute top-2 right-2 bg-white rounded-full h-8 w-8 shadow-sm hover:bg-white ${
-                        isFavorite(product.id) ? "text-red-500" : ""
-                      }`}
-                      onClick={() => handleToggleFavorite(product)}
-                    >
-                      <Heart className={`h-4 w-4 ${isFavorite(product.id) ? "fill-current" : ""}`} />
+            {filteredProducts.map((product) => {
+              const numericId = Number(product.id.replace(/\D/g, "").slice(-9) || Date.now())
+              return (
+                <Card key={product.id} className="overflow-hidden">
+                  <CardContent className="flex flex-col items-center p-4">
+                    <div className="relative w-full">
+                      <img src={product.image || "/placeholder.svg"} alt={product.name} className="w-full h-40 object-cover mb-4" />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className={`absolute top-2 right-2 bg-white rounded-full h-8 w-8 shadow-sm hover:bg-white ${isFavorite(numericId) ? "text-red-500" : ""}`}
+                        onClick={() => handleToggleFavorite(product)}
+                      >
+                        <Heart className={`h-4 w-4 ${isFavorite(numericId) ? "fill-current" : ""}`} />
+                      </Button>
+                    </div>
+                    <h2 className="text-lg font-bold mb-2">{product.name}</h2>
+                    <p className="text-sm text-gray-500 mb-2">Farmer: {product.farmer}</p>
+                    <p className="text-sm text-gray-500 mb-2">Location: {product.location}</p>
+                    <div className="flex items-center mb-2">
+                      <Badge variant="outline" className="mr-2">{product.distance} km</Badge>
+                      <Badge variant="outline" className="mr-2">₹{product.price}/{product.unit}</Badge>
+                      <Badge variant="outline">{product.rating.toFixed(1)} ★</Badge>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-4">Freshness: {product.freshness}</p>
+                    <Button variant="default" className="w-full" onClick={() => handleAddToCart(product)}>
+                      Add to Cart
                     </Button>
-                  </div>
-                  <h2 className="text-lg font-bold mb-2">{product.name}</h2>
-                  <p className="text-sm text-gray-500 mb-2">Farmer: {product.farmer}</p>
-                  <p className="text-sm text-gray-500 mb-2">Location: {product.location}</p>
-                  <div className="flex items-center mb-2">
-                    <Badge variant="outline" className="mr-2">
-                      {product.distance} km
-                    </Badge>
-                    <Badge variant="outline" className="mr-2">
-                      ₹{product.price}/{product.unit}
-                    </Badge>
-                    <Badge variant="outline">{product.rating} ★</Badge>
-                  </div>
-                  <p className="text-sm text-gray-500 mb-4">Freshness: {product.freshness}</p>
-                  <Button variant="default" className="w-full" onClick={() => handleAddToCart(product)}>
-                    Add to Cart
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
 
           {filteredProducts.length === 0 && (

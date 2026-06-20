@@ -14,51 +14,38 @@ import { auth } from "@/lib/firebase"
 import { signOut, getAuth, onAuthStateChanged } from "firebase/auth"
 
 export default function CartPage() {
-  
   const { toast } = useToast()
   const { cart, updateCartItemQuantity, removeFromCart, clearCart } = useStore()
   const [isCheckingOut, setIsCheckingOut] = useState(false)
-  const [activeTab, setActiveTab] = useState("discover")
-    const router = useRouter()
-  
+  const [user, setUser] = useState<any>(null)
+  const router = useRouter()
+
   const handleLogout = async () => {
     try {
       await signOut(auth)
-      router.push("/auth/login") // Redirect user after logout
+      router.push("/auth/login")
     } catch (error) {
       console.error("Error signing out:", error)
-      // Optional: Toast or alert
     }
   }
-  const useCurrentUser = () => {
-    const [user, setUser] = useState<any>(null);
-    const auth = getAuth();
-  
-    useEffect(() => {
-      const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-        if (firebaseUser) {
-          setUser({
-            uid: firebaseUser.uid,
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || null,
-            email: firebaseUser.email || null,
-            image: firebaseUser.photoURL || null,
-          });
-        } else {
-          setUser(null);
-        }
-      });
-  
-      return () => unsubscribe();
-    }, [auth]);
-  
-    return user;
-  };
-  
-  const user = useCurrentUser();
-  
-  const userId = user?.uid;
-  
+
+  useEffect(() => {
+    const authInstance = getAuth()
+    const unsubscribe = onAuthStateChanged(authInstance, (firebaseUser) => {
+      if (firebaseUser) {
+        setUser({
+          uid: firebaseUser.uid,
+          name: firebaseUser.displayName || null,
+          email: firebaseUser.email || null,
+          image: firebaseUser.photoURL || null,
+        })
+      } else {
+        setUser(null)
+      }
+    })
+
+    return () => unsubscribe()
+  }, [])
 
   // Calculate totals
   const subtotal = cart.reduce((total, item) => total + item.price * item.quantity, 0)
@@ -79,8 +66,12 @@ export default function CartPage() {
   }
 
   const handleCheckout = () => {
-    setIsCheckingOut(true);
-    router.push("/consumer/checkout");
+    setIsCheckingOut(true)
+    router.push("/consumer/checkout")
+  }
+
+  const showNotifications = () => {
+    toast({ title: "No notifications", description: "Your cart updates are already reflected on this page." })
   }
 
   return (
@@ -115,17 +106,17 @@ export default function CartPage() {
         <div className="border-t p-4">
   <div className="flex items-center gap-4 mb-4">
     <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-      {user?.photoURL ? (
-        <img src={user.photoURL || "/placeholder.svg"} alt="User" className="h-10 w-10 rounded-full" />
+      {user?.image ? (
+        <img src={user.image || "/placeholder.svg"} alt="User" className="h-10 w-10 rounded-full" />
       ) : (
         <span className="text-sm font-semibold">
-          {user?.displayName?.[0] || user?.email?.[0] || "U"}
+          {user?.name?.[0] || user?.email?.[0] || "U"}
         </span>
       )}
     </div>
     <div>
       <p className="text-sm font-medium">
-        {user?.displayName || user?.email || "Unknown User"}
+        {user?.name || user?.email || "Unknown User"}
       </p>
       {/* {!editingLocation ? (
         <p className="text-xs text-gray-500">
@@ -183,7 +174,7 @@ export default function CartPage() {
             <Leaf className="h-5 w-5 text-green-600" />
           </Button>
           <div className="ml-auto flex items-center gap-4">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={showNotifications}>
               <Bell className="h-4 w-4" />
             </Button>
             
@@ -228,9 +219,7 @@ export default function CartPage() {
                         <div className="flex-1">
                           <h3 className="font-medium">{item.name}</h3>
                           <p className="text-sm text-gray-500">Farmer: {item.farmer}</p>
-                          <p className="text-sm font-medium">
-                            ₹{item.price}/{item.unit}
-                          </p>
+                          <p className="text-sm font-medium">Rs. {item.price}/{item.unit}</p>
                         </div>
                         <div className="flex items-center space-x-2">
                           <Button
@@ -257,7 +246,7 @@ export default function CartPage() {
                           </Button>
                         </div>
                         <div className="text-right min-w-[80px]">
-                          <p className="font-medium">₹{item.price * item.quantity}</p>
+                          <p className="font-medium">Rs. {item.price * item.quantity}</p>
                         </div>
                         <Button
                           variant="ghost"
@@ -289,16 +278,16 @@ export default function CartPage() {
                   <CardContent className="space-y-4">
                     <div className="flex justify-between">
                       <span className="text-gray-500">Subtotal</span>
-                      <span>₹{subtotal}</span>
+                      <span>Rs. {subtotal}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Delivery Fee</span>
-                      <span>₹{deliveryFee}</span>
+                      <span>Rs. {deliveryFee}</span>
                     </div>
                     <Separator />
                     <div className="flex justify-between font-medium text-lg">
                       <span>Total</span>
-                      <span>₹{total}</span>
+                      <span>Rs. {total}</span>
                     </div>
                   </CardContent>
                   <CardFooter>
